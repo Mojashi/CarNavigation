@@ -26,7 +26,7 @@ Vmax[m/sec] Vmin[m/sec] Pmut Psht Pind0 Pind1
 Tstep[sec] Tpred[sec] Npop, Ngen Tsim
 
 |V| |E|
-from to length startTime Kjam[台/m]
+from to length Kjam[台/m]
 ...
 
 |Car|
