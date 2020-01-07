@@ -4,23 +4,7 @@ import random
 import sys
 
 
-#入力形式
-#Vmax[m/sec] Vmin[m/sec] Pmut Psht Pind0 Pind1
-#Tstep[sec] Tpred[sec] Npop, Ngen Tsim
-
-#|V| |E|
-#from to length Kjam[台/m]
-#...
-
-#|Car|
-#from to startT
-#...
-
-programname = sys.argv[1]
-Nrate = int(sys.argv[2])
 Ncar = 5000
-
-radius = 3
 
 Vmax = 13.8888889
 Vmin = 1.66666667
@@ -34,9 +18,15 @@ Npop = 20
 Ngen = 25
 Tsim = 10
 
+Kjam = 0.144
+
+
+programname = sys.argv[1]
+Nrate = int(sys.argv[2])
+radius = 3
 length = 783
 dense = 8
-Kjam = 0.144
+
 
 edges = []
 
@@ -74,5 +64,16 @@ with Popen(programname,stdin = subprocess.PIPE) as p:
             to = random.randint(radius * dense,radius * dense + 3)
         instr +=str(fr) +" " +  str(to) + " " + str(i // Nrate) +"\n"
     
+#入力形式
+#Vmax[m/sec] Vmin[m/sec] Pmut Psht Pind0 Pind1
+#Tstep[sec] Tpred[sec] Npop, Ngen Tsim
+
+#|V| |E|
+#from to length Kjam[台/m]
+#...
+
+#|Car|
+#from to startT
+#...
     print(instr)
     p.communicate(input=instr.encode())
