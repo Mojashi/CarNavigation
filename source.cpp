@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <vector>
 #include <functional>
+#include <array>
 #include <fstream>
 #include <map>
 #include <queue>
@@ -18,6 +19,7 @@ struct Graph;
 struct Status;
 
 void nextStep(const Instance&, Solution&, Status&, bool addNewCar = false);
+void nextStep(const Instance&, Solution&, Status&, int duration);
 float simulate(const Instance&);
 Solution geneticAlgorithm(const Instance&,const Status&);
 Solution commander(const Instance&, const Status&);
@@ -45,7 +47,7 @@ struct Car{
 struct Instance{
 
     Graph g;
-    int N,M;
+    int N,M, lastStartTime;
 
     float Vmax,Vmin, Pmut, Psht, Pind0, Pind1;
     int Tstep,Tpred, Npop, Ngen, Tsim, Lsec;
@@ -57,15 +59,19 @@ struct Instance{
 
     void read(){
         cin >> Vmax >> Vmin >> Pmut >> Psht >> Pind0 >> Pind1
-         >> Tstep >> Tpred >> Npop >> Ngen >> Tsim >> Lsec;
-        
+         >> Tstep >> Tpred >> Npop >> Ngen >> Tsim;
+		Lsec = Vmax * Tsim;
+		Tstep /= Tsim;
+		Tpred /= Tsim;
+
         cin >> N >> M;
         g.g.resize(N);
 
         Kjam.resize(N,vector<float>(N));
 
         for(int i = 0; M > i; i++){
-            int f,t,d, jam;
+			int f, t, d;
+			float jam;
 
             cin >> f >> t >> d >> jam;
             g.g[f].push_back({f,t,d});
@@ -75,9 +81,11 @@ struct Instance{
         int carNum;
         cin >> carNum;
         cars.resize(carNum);
+		lastStartTime = 0;
         for(int i = 0; carNum > i; i++){
             Car car;
             cin >> car.from >> car.to >> car.startT;
+			lastStartTime = max(lastStartTime, car.startT);
             car.id = i;
             car.pos = -1;
             cars[i] = car;
@@ -88,33 +96,35 @@ struct Instance{
 
     int getVertex(int cur, int from, int goal, int rank) const{
         int ud = 0, i;
-        for(i = 0; cur < rank; i++){
+        for(i = 0; ud <= rank && i < edRank[cur][goal].size(); i++){
             if(edRank[cur][goal][i] != from) 
                 ud++;
         }
 
-        return edRank[cur][goal][i];
+        return edRank[cur][goal][i-1];
     }
 
     void calcDistance(){
         dist.resize(g.size());
         edRank.resize(g.size());
         for(int i = 0; g.size() > i; i++){
-            dist.resize(g.g[i].size());
-            edRank[i].resize(g.g[i].size());
+            dist[i].resize(g.size());
+            edRank[i].resize(g.size());
             calcDistance(i);
-
-            for(int j = 0; g.size() > j; j++){
-                vector<pair<int,int>> buf;
-                for(auto nex : g.g[i]){
-                    buf.push_back(make_pair(nex.d + dist[nex.to][j], j));
-                }
-                sort(buf.begin(), buf.end());
-                for(int k = 0; buf.size() > k; k++){
-                    edRank[i][j].push_back(buf[k].second);
-                }
-            }
         }
+
+		for (int i = 0; g.size() > i; i++) {
+			for (int j = 0; g.size() > j; j++) {
+				vector<pair<int, int>> buf;
+				for (auto nex : g.g[i]) {
+					buf.push_back(make_pair(nex.d + dist[nex.to][j], nex.to));
+				}
+				sort(buf.begin(), buf.end());
+				for (int k = 0; buf.size() > k; k++) {
+					edRank[i][j].push_back(buf[k].second);
+				}
+			}
+		}
     }
     void calcDistance(int from){
         priority_queue<pair<int,int>, vector<pair<int,int>>, greater<pair<int,int>>> pq;
@@ -140,7 +150,7 @@ struct Solution{
     bool init = false;
     Solution(){}
     Solution(const Instance& ins){
-        route.resize(ins.g.size());
+        route.resize(ins.cars.size());
         init = true;
     }
 };
@@ -153,11 +163,12 @@ struct SectionPos{
 
 struct Status{
     int time;
-    Instance *ins;
+    const Instance *ins;
     vector<vector<vector<list<Car>>>> section;
     map<int, SectionPos> carPos;
 
-    Status(const Instance& ins){
+    Status(const Instance& ins):ins(&ins){
+		time = 0;
         section.resize(ins.g.size());
         for(int i = 0; ins.g.size() > i; i++){
             section[i].resize(ins.g.size());
@@ -182,7 +193,8 @@ struct Status{
         }
         else{
             SectionPos pos = carPos.at(car.id);
-            return ins->dist[pos.to][car.to] + pos.secNum * ins->Lsec + pos.dist;
+			if (pos.goal) return 0;
+            return ins->dist[pos.from][car.to] + pos.secNum * ins->Lsec + pos.dist;
         }
     }
 
@@ -199,22 +211,44 @@ struct Status{
 Solution genRandSol(const Instance& ins, const Status& stat){
     Solution sol(ins);
 
-    for(int carid = 0; ins.cars.size() > carid; carid++){
+    for(int carid = 0; stat.carPos.size() > carid; carid++){
+		if (stat.carPos.at(carid).goal) continue;
         Car car = ins.cars[carid];
-        int cur = stat.carPos.at(carid).from, bef = -1;
-
+        int cur = stat.carPos.at(carid).to, bef = -1;
         while(car.to != cur){
-            int nex = mt() % ins.g.g[cur].size();
-            sol.route[carid].push_back(nex);
-            cur = nex;
+            int rank = mt() % ins.g.g[cur].size();
+            sol.route[carid].push_back(rank);
+            int nex = ins.getVertex(cur, bef, car.to, rank);
+			bef = cur;
+			cur = nex;
         }
     }
     
     return sol;
 }
 
+Solution genShortestPathSol(const Instance& ins, const Status& stat) {
+	Solution sol(ins);
+
+	for (int carid = 0; stat.carPos.size() > carid; carid++) {
+		if (stat.carPos.at(carid).goal) continue;
+		Car car = ins.cars[carid];
+		int cur = stat.carPos.at(carid).to, bef = -1;
+		while (car.to != cur) {
+			int rank = 0;
+			sol.route[carid].push_back(rank);
+			int nex = ins.getVertex(cur, bef, car.to, rank);
+			bef = cur;
+			cur = nex;
+		}
+	}
+
+	return sol;
+}
+
+
 void mutation(const Instance& ins, const Status& stat, Solution& sol){
-    for(int carid = 0; ins.cars.size() > carid; carid++){
+    for(int carid = 0; stat.carPos.size() > carid; carid++){
         Car car = ins.cars[carid];
         int cur = stat.carPos.at(carid).from, bef = -1;
 
@@ -226,7 +260,7 @@ void mutation(const Instance& ins, const Status& stat, Solution& sol){
                 sol.route[carid].push_back(0);
 
             //apply upperbound
-            sol.route[carid][i] = min(sol.route[carid][i] - 1, (int)ins.g.g[cur].size());
+            sol.route[carid][i] = min(sol.route[carid][i], (int)ins.g.g[cur].size() - 1);
             
             if(rng(mt) < ins.Pmut){
                 sol.route[carid][i] = mt() % ins.g.g[cur].size();
@@ -239,7 +273,7 @@ void mutation(const Instance& ins, const Status& stat, Solution& sol){
 }
 
 void shorten(const Instance& ins, const Status& stat, Solution& sol){
-    for(int carid = 0; ins.cars.size() > carid; carid++){
+    for(int carid = 0; stat.carPos.size() > carid; carid++){
         Car car = ins.cars[carid];
         int cur = stat.carPos.at(carid).from, bef = -1;
 
@@ -251,7 +285,7 @@ void shorten(const Instance& ins, const Status& stat, Solution& sol){
                 sol.route[carid].push_back(0);
 
             //apply upperbound
-            sol.route[carid][i] = min(sol.route[carid][i] - 1, (int)ins.g.g[cur].size());
+            sol.route[carid][i] = min(sol.route[carid][i], (int)ins.g.g[cur].size() - 1);
             
             if(rng(mt) < ins.Psht){
                 sol.route[carid][i] = max(0, sol.route[carid][i] - 1);
@@ -275,16 +309,20 @@ array<Solution,2> crossOver(const Instance& ins, const Status& stat, Solution& s
     return ret;
 }
 
+void nextStep(const Instance& ins, Solution& sol, Status& stat, int duration) {
+	for (int i = 0; duration > i; i++)
+		nextStep(ins,sol,stat);
+}
 void nextStep(const Instance& ins, Solution& sol, Status& stat, bool addNewCar){
     Status ret(ins);
-
+	ret.time = stat.time + 1;
     if(addNewCar){
         for(Car car : ins.cars){
             if(car.startT == stat.time){
                 SectionPos newPos;
                 newPos.dist = 0;
                 newPos.from = car.from;
-                newPos.to = car.to;
+                newPos.to = ins.getVertex(car.from, -1, car.to, 0);
                 newPos.goal = false;
                 newPos.goaltime = -1;
                 newPos.secNum = 0;
@@ -297,50 +335,48 @@ void nextStep(const Instance& ins, Solution& sol, Status& stat, bool addNewCar){
         }
     }
 
-    for(int from = 0; stat.section.size() > from; from++){
-        for(int to = 0; stat.section[from].size() > to; to++){
-            for(int sec = 0; stat.section[from][to].size() > sec; sec++){
-                for(auto car : stat.section[from][to][sec]){
+	for (auto section : stat.carPos) {
+		if (section.second.goal) continue;
+		int from = section.second.from, to = section.second.to, sec = section.second.secNum;
+		Car car = ins.cars[section.first];
 
-                    float k = ins.Lsec *1.0 / (stat.section[from][to].size() - 1);
-                    float v = max((1-k/ins.Kjam[from][to]) * ins.Vmax, ins.Vmin);
-                    float dist = v * ins.Tsim;
+		float k = 1.0 * (stat.section[from][to][sec].size() - 1) / ins.Lsec;
+		float v = max((1 - k / ins.Kjam[from][to]) * ins.Vmax, ins.Vmin);
+		float dist = v * ins.Tsim;
 
-                    SectionPos newPos(stat.carPos.at(car.id));
-                    newPos.dist += dist;
+		SectionPos newPos(stat.carPos.at(car.id));
+		newPos.dist += dist;
 
-                    while(car.pos > ins.Lsec){
-                        if(stat.section[from][to][sec].size() == sec + 1){
-                            newPos.secNum = 0;
-                            if(to == car.to){
-                                newPos.goal = true;
-                                newPos.goaltime = stat.time;
-                                break;
-                            }
-                            else{
-                                int rank = 1;
-                                if(sol.route[car.id].size()){
-                                    rank = sol.route[car.id].front();
-                                    sol.route[car.id].erase(sol.route[car.id].begin());
-                                }
+		while (newPos.dist > ins.Lsec) {
+			if (stat.section[from][to].size() == newPos.secNum + 1) {
+				newPos.secNum = 0;
+				if (to == car.to) {
+					newPos.goal = true;
+					newPos.goaltime = stat.time;
+					break;
+				}
+				else {
+					int rank = 1;
+					if (sol.route[car.id].size()) {
+						rank = sol.route[car.id].front();
+						sol.route[car.id].erase(sol.route[car.id].begin());
+					}
 
-                                newPos.to = ins.getVertex(newPos.to, newPos.from, car.to, rank);
-                                newPos.from = newPos.to;
-                            }
-                        }
-                        else 
-                            newPos.secNum++;
-                        car.pos = car.pos + dist - ins.Lsec;
-                    }
+					newPos.from = newPos.to;
+					newPos.to = ins.getVertex(newPos.to, newPos.from, car.to, rank);
+				}
+			}
+			else
+				newPos.secNum++;
+			newPos.dist = newPos.dist - ins.Lsec;
+		}
 
-                    car.pos = newPos.dist;
-                    if(!newPos.goal)
-                        ret.section[newPos.from][newPos.to][newPos.secNum].push_back(car);
-                    ret.carPos[car.id] = newPos;
-                }
-            }
-        }
-    }
+		car.pos = newPos.dist;
+		if (!newPos.goal)
+			ret.section[newPos.from][newPos.to][newPos.secNum].push_back(car);
+		ret.carPos[car.id] = newPos;
+	}
+	
 
     for(auto itr : stat.carPos){
         if(itr.second.goal){
@@ -352,8 +388,8 @@ void nextStep(const Instance& ins, Solution& sol, Status& stat, bool addNewCar){
 }
 
 Status applySol(const Instance& ins, Status curStat, Solution sol, int duration){
-    
-    for(int t = curStat.time; curStat.time + duration > t; t++){
+	int until = curStat.time + duration;
+    for(int t = curStat.time; until > t; t++){
         nextStep(ins, sol, curStat, false);
     }
 
@@ -369,12 +405,10 @@ float geneEval(const Instance& ins, const Status& bef, const Solution& sol){
         float aftDist = aft.getDist(ins.cars[car.first]);
         auto pos = aft.carPos.at(ins.cars[car.first].id);
         float duration = ins.Tpred;
-        if(pos.goal){
-            duration = pos.goaltime - bef.time;
-        }
-        assert(duration >= 0);
-
-        score += (aftDist - befDist) / duration;
+		if(pos.goal)
+			duration = max(0.0f, pos.goaltime - bef.time);
+		if(duration > 0)
+	        score += (befDist - aftDist) / (ins.Tsim * duration);
     }
 
     return score / bef.carPos.size();
@@ -387,31 +421,37 @@ Solution geneticAlgorithm(const Instance& ins, const Status& curStat){
 
     gen.resize(ins.Npop);
     for(int i = 0; ins.Npop > i; i++){
-        Solution sol = genRandSol(ins,curStat);
+        Solution sol = genShortestPathSol(ins,curStat);
         gen[i] = {geneEval(ins, curStat, sol), sol};
         if(i > 0){
             if(gen[i].first > ace.first)
                 ace = {gen[i].first, &gen[i].second};
-            Min = min(Min, gen[i].first);
+            Min = min(Min, gen[i].first-0.1f);
         }
         else{
             ace = {gen[i].first, &gen[i].second};
-            Min = gen[i].first;
+            Min = gen[i].first-0.1;
         }
         sum += gen[i].first;
     }
-    sum += Min * ins.Npop;
+    sum -= Min * ins.Npop;
 
     for(int g = 0; ins.Ngen > g; g++){
         vector<Solution> nextGen;
 
-        while(nextGen.size() < ins.Npop){
-            float roulette = rng(mt), csum = 0;
+        while(nextGen.size() < ins.Npop-1){
             Solution *par[2] = {};
 
             while(par[1] == NULL){
+				float roulette = rng(mt), csum = 0;
                 for(int i = 0; ins.Npop > i; i++){
-                    csum += (gen[i].first + Min) / sum;
+					if (sum <= 0) {
+						printf("%f %f\n", sum, Min);
+						for (int j = 0; ins.Npop > j; j++)
+							cout << gen[j].first << endl;
+					}
+					assert(sum > 0);
+                    csum += (gen[i].first - Min) / sum;
                     if(csum > roulette){
                         if(par[0] == NULL) par[0] = &gen[i].second;
                         else par[1] = &gen[i].second;
@@ -422,7 +462,7 @@ Solution geneticAlgorithm(const Instance& ins, const Status& curStat){
 
             auto buf = crossOver(ins, curStat, *par[0], *par[1]);
             nextGen.push_back(buf[0]);
-            if(nextGen.size() < ins.Npop)
+            if(nextGen.size() < ins.Npop-1)
                 nextGen.push_back(buf[1]);
         }
 
@@ -442,15 +482,15 @@ Solution geneticAlgorithm(const Instance& ins, const Status& curStat){
             if(i > 0){
                 if(gen[i].first > ace.first)
                    ace = {gen[i].first, &gen[i].second};
-                Min = min(Min, gen[i].first);
-            }
-            else{
-                ace = {gen[i].first, &gen[i].second};
-                Min = gen[i].first;
-            }
+				Min = min(Min, gen[i].first - 0.1f);
+			}
+			else {
+				ace = { gen[i].first, &gen[i].second };
+				Min = gen[i].first - 0.1;
+			}
             sum += gen[i].first;
         }
-        sum += Min * ins.Npop;
+        sum -= Min * ins.Npop;
     }   
 
     return *ace.second;
@@ -465,25 +505,25 @@ float simulate(const Instance& ins){
     Status stat(ins);
     Solution schedule(ins);
 
-    for(int t = 0; stat.rest() || stat.carPos.size(); t++){
+    for(int t = 0; stat.rest() || t <= ins.lastStartTime; t++){
 
-        if(t % ins.Tstep == 0 && t > 0){
+        if(t %ins.Tstep == 0 && t > 0){
             Status buf(stat);
             Solution buf2(schedule);
-            nextStep(ins, buf2, buf, ins.Tstep);
+			printf("t=%d remain car=%d Calc routes...\n",t, stat.rest() + ins.cars.size() - stat.carPos.size());
             schedule = commander(ins, buf);
         }
         
-        nextStep(ins, schedule, stat);
+        nextStep(ins, schedule, stat, true);
     }
 
     float ret = 0;
 
     for(auto car : stat.carPos){
-        ret += 1.0*ins.dist[ins.cars[car.first].from][ins.cars[car.first].to] / car.second.goaltime;
+       ret += 1.0*ins.dist[ins.cars[car.first].from][ins.cars[car.first].to] / (car.second.goaltime * ins.Tsim);
     }
 
-    return ret;
+    return ret * 3600 / 1000 / ins.cars.size();
 }
 
 int main(){
