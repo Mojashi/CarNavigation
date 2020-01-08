@@ -55,7 +55,7 @@ struct Instance{
     vector<Car> cars;
 
     vector<vector<vector<int>>> edRank;
-    vector<vector<int>> dist;
+    vector<vector<int>> dist, edgeIdxTable;
 
     void read(){
         cin >> Vmax >> Vmin >> Pmut >> Psht >> Pind0 >> Pind1
@@ -68,12 +68,13 @@ struct Instance{
         g.g.resize(N);
 
         Kjam.resize(N,vector<float>(N));
-
+        edgeIdxTable.resize(N,vector<int>(N, -1));
         for(int i = 0; M > i; i++){
 			int f, t, d;
 			float jam;
 
             cin >> f >> t >> d >> jam;
+            edgeIdxTable[f][t] = g.g[f].size();
             g.g[f].push_back({f,t,d});
             Kjam[f][t] = jam;
         }
@@ -94,6 +95,9 @@ struct Instance{
         calcDistance();//init edRank and dist
     }
 
+    int findEdgeIdx(int from, int to)const {
+        return edgeIdxTable[from][to];
+    }
     int getVertex(int cur, int from, int goal, int rank) const{
         int ud = 0, i;
         for(i = 0; ud <= rank && i < edRank[cur][goal].size(); i++){
@@ -171,9 +175,9 @@ struct Status{
 		time = 0;
         section.resize(ins.g.size());
         for(int i = 0; ins.g.size() > i; i++){
-            section[i].resize(ins.g.size());
-            for(auto next : ins.g.g[i]){
-                section[i][next.to].resize((next.d + ins.Lsec-1) / ins.Lsec);
+            section[i].resize(ins.g.g[i].size());
+            for(int j = 0; ins.g.g[i].size() > j; j++){
+                section[i][j].resize((ins.g.g[i][j].d + ins.Lsec-1) / ins.Lsec);
             }
         }
     }
@@ -329,7 +333,7 @@ void nextStep(const Instance& ins, Solution& sol, Status& stat, bool addNewCar){
                 car.pos = 0;
 
                 if(!newPos.goal)
-                    stat.section[newPos.from][newPos.to][newPos.secNum].push_back(car);
+                    stat.section[newPos.from][ins.findEdgeIdx(newPos.from, newPos.to)][newPos.secNum].push_back(car);
                 stat.carPos[car.id] = newPos;
             }
         }
@@ -340,7 +344,7 @@ void nextStep(const Instance& ins, Solution& sol, Status& stat, bool addNewCar){
 		int from = section.second.from, to = section.second.to, sec = section.second.secNum;
 		Car car = ins.cars[section.first];
 
-		float k = 1.0 * (stat.section[from][to][sec].size() - 1) / ins.Lsec;
+		float k = 1.0 * (stat.section[from][ins.findEdgeIdx(from, to)][sec].size() - 1) / ins.Lsec;
 		float v = max((1 - k / ins.Kjam[from][to]) * ins.Vmax, ins.Vmin);
 		float dist = v * ins.Tsim;
 
@@ -348,7 +352,7 @@ void nextStep(const Instance& ins, Solution& sol, Status& stat, bool addNewCar){
 		newPos.dist += dist;
 
 		while (newPos.dist > ins.Lsec) {
-			if (stat.section[from][to].size() == newPos.secNum + 1) {
+			if (stat.section[from][ins.findEdgeIdx(from, to)].size() == newPos.secNum + 1) {
 				newPos.secNum = 0;
 				if (to == car.to) {
 					newPos.goal = true;
@@ -373,7 +377,7 @@ void nextStep(const Instance& ins, Solution& sol, Status& stat, bool addNewCar){
 
 		car.pos = newPos.dist;
 		if (!newPos.goal)
-			ret.section[newPos.from][newPos.to][newPos.secNum].push_back(car);
+			ret.section[newPos.from][ins.findEdgeIdx(newPos.from, newPos.to)][newPos.secNum].push_back(car);
 		ret.carPos[car.id] = newPos;
 	}
 	
@@ -421,7 +425,7 @@ Solution geneticAlgorithm(const Instance& ins, const Status& curStat){
 
     gen.resize(ins.Npop);
     for(int i = 0; ins.Npop > i; i++){
-        Solution sol = genShortestPathSol(ins,curStat);
+        Solution sol = genRandSol(ins,curStat);
         gen[i] = {geneEval(ins, curStat, sol), sol};
         if(i > 0){
             if(gen[i].first > ace.first)

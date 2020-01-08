@@ -14,8 +14,8 @@ Pind0 = 0.1
 Pind1 = 0.5
 Tstep = 30
 Tpred = 1200
-Npop = 20
-Ngen = 25
+Npop = 40
+Ngen = 250
 Tsim = 10
 
 Kjam = 0.144
@@ -64,16 +64,5 @@ with Popen(programname,stdin = subprocess.PIPE) as p:
             to = random.randint(radius * dense,radius * dense + 3)
         instr +=str(fr) +" " +  str(to) + " " + str(i // Nrate) +"\n"
     
-#入力形式
-#Vmax[m/sec] Vmin[m/sec] Pmut Psht Pind0 Pind1
-#Tstep[sec] Tpred[sec] Npop, Ngen Tsim
-
-#|V| |E|
-#from to length Kjam[台/m]
-#...
-
-#|Car|
-#from to startT
-#...
     print(instr)
     p.communicate(input=instr.encode())
