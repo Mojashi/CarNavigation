@@ -157,6 +157,15 @@ struct Solution{
         route.resize(ins.cars.size());
         init = true;
     }
+    void show(FILE* out){
+        for(int i = 0; route.size() > i; i++){
+            if(route[i].size() == 0) continue;
+            fprintf(out, "%d: ", i);
+            for(int j = 0; route[i].size() > j; j++)
+                fprintf(out, "%d ", route[i][j]);
+            fprintf(out, "\n");
+        }
+    }
 };
 
 struct SectionPos{
@@ -514,8 +523,9 @@ float simulate(const Instance& ins){
         if(t %ins.Tstep == 0 && t > 0){
             Status buf(stat);
             Solution buf2(schedule);
-			printf("t=%d remain car=%d Calc routes...\n",t, stat.rest() + ins.cars.size() - stat.carPos.size());
+			fprintf(stderr, "t=%d remain car=%d Calc routes...\n",t, stat.rest() + ins.cars.size() - stat.carPos.size());
             schedule = commander(ins, buf);
+            schedule.show(stderr);
         }
         
         nextStep(ins, schedule, stat, true);
