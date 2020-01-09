@@ -4,7 +4,7 @@ import random
 import sys
 
 
-Ncar = 50
+Ncar = 1
 
 Vmax = 13.8888889
 Vmin = 1.66666667
@@ -12,15 +12,15 @@ Pmut = 0.1
 Psht = 0.1
 Pind0 = 0.1
 Pind1 = 0.5
-Tstep = 30
-Tpred = 120
+Tstep = 300
+Tpred = 1200
 Npop = 40
 Ngen = 250
 Tsim = 10
 
 Kjam = 0.144
 
-def exec(programname, Nrate):
+def exec(programname, mode, Nrate):
     radius = 3
     length = 783
     dense = 8
@@ -43,7 +43,7 @@ def exec(programname, Nrate):
     edges.append((radius * dense + 3,(radius-1) * dense + 6 ,length , Kjam))
 
     with Popen(programname,stdout = subprocess.PIPE,stdin = subprocess.PIPE) as p:
-        instr = ""
+        instr = mode + "\n"
 
         instr += str(Vmax) + " " + str(Vmin) + " " + str(Pmut) + " " + str(Psht) + " " + str(Pind0) + " " + str(Pind1) +"\n"
         instr += str(Tstep)+ " " + str(Tpred)+ " " + str(Npop)+ " " + str(Ngen)+ " " + str(Tsim) +"\n"
@@ -67,5 +67,5 @@ def exec(programname, Nrate):
         return out
 
 if __name__ == "__main__":
-    res = exec(sys.argv[1], int(sys.argv[2]))
+    res = exec(sys.argv[1], sys.argv[2], int(sys.argv[3]))
     print(res.decode())

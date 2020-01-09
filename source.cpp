@@ -13,6 +13,12 @@
 
 using namespace std;
 
+enum Mode{
+    GA,
+    NOTSHORTEN,
+    MINDIST
+} mode;
+
 struct Solution;
 struct Instance;
 struct Graph;
@@ -481,10 +487,15 @@ Solution geneticAlgorithm(const Instance& ins, const Status& curStat){
 
         for(auto& sol : nextGen){
             if(rng(mt) < ins.Pind0){
-                if(rng(mt) < ins.Pind1)
-                    shorten(ins, curStat, sol);
-                else
+                if(mode == GA){
+                    if(rng(mt) < ins.Pind1)
+                        shorten(ins, curStat, sol);
+                    else
+                        mutation(ins, curStat, sol);
+                }
+                else if(mode == NOTSHORTEN){
                     mutation(ins, curStat, sol);
+                }
             }
         }
         nextGen.push_back(*ace.second);
@@ -510,7 +521,10 @@ Solution geneticAlgorithm(const Instance& ins, const Status& curStat){
 }
 
 Solution commander(const Instance& ins,const Status& stat){
-    return geneticAlgorithm(ins, stat);
+    if(mode == GA || mode == NOTSHORTEN)
+        return geneticAlgorithm(ins, stat);
+    if(mode == MINDIST)
+        return genShortestPathSol(ins, stat);
 }
 
 
@@ -541,6 +555,15 @@ float simulate(const Instance& ins){
 }
 
 int main(){
+    string modeStr;
+    cin >> modeStr;
+    if(modeStr == "NOTSHORTEN") mode = NOTSHORTEN;
+    else if(modeStr == "GA") mode = GA;
+    else if(modeStr == "MINDIST") mode = MINDIST;
+    else {
+        cerr << "invalid mode" << endl;
+        return 1;
+    }
     Instance ins;
     ins.read();
 
