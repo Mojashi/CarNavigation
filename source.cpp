@@ -63,6 +63,8 @@ struct Instance{
     vector<vector<vector<int>>> edRank;
     vector<vector<int>> dist, edgeIdxTable;
 
+    int SumBlocks = 0;
+
     void read(){
         cin >> Vmax >> Vmin >> Pmut >> Psht >> Pind0 >> Pind1
          >> Tstep >> Tpred >> Npop >> Ngen >> Tsim;
@@ -78,7 +80,7 @@ struct Instance{
         for(int i = 0; M > i; i++){
 			int f, t, d;
 			float jam;
-
+            SumBlocks += (d + Lsec-1) / Lsec;
             cin >> f >> t >> d >> jam;
             edgeIdxTable[f][t] = g.g[f].size();
             g.g[f].push_back({f,t,d});
@@ -366,16 +368,23 @@ void nextStep(const Instance& ins, Solution& sol, Status& stat, bool addNewCar){
 		SectionPos newPos(stat.carPos.at(car.id));
 		newPos.dist += dist;
 
-		while (newPos.dist > ins.Lsec) {
-			if (stat.section[from][ins.findEdgeIdx(from, to)].size() == newPos.secNum + 1) {
+		while (1) {
+            int edNum = ins.findEdgeIdx(from, to);
+            int sectNum = stat.section[from][edNum].size();
+            int sectLen = ins.Lsec;
+            if(sectNum == newPos.secNum + 1)
+                sectLen = ins.g.g[from][edNum].d % ins.Lsec;
+
+            if(newPos.dist <= sectLen) break;
+			if (sectNum == newPos.secNum + 1) {
 				newPos.secNum = 0;
 				if (to == car.to) {
 					newPos.goal = true;
-					newPos.goaltime = stat.time;
+					newPos.goaltime = stat.time + 1 - (newPos.dist - sectLen)/v/ins.Tsim;
 					break;
 				}
 				else {
-					int rank = 1;
+					int rank = 0;
 					if (sol.route[car.id].size()) {
 						rank = sol.route[car.id].front();
 						sol.route[car.id].erase(sol.route[car.id].begin());
@@ -387,7 +396,7 @@ void nextStep(const Instance& ins, Solution& sol, Status& stat, bool addNewCar){
 			}
 			else
 				newPos.secNum++;
-			newPos.dist = newPos.dist - ins.Lsec;
+			newPos.dist = newPos.dist - sectLen;
 		}
 
 		car.pos = newPos.dist;
@@ -548,7 +557,7 @@ float simulate(const Instance& ins){
     float ret = 0;
 
     for(auto car : stat.carPos){
-       ret += 1.0*ins.dist[ins.cars[car.first].from][ins.cars[car.first].to] / (car.second.goaltime * ins.Tsim);
+       ret += 1.0*ins.dist[ins.cars[car.first].from][ins.cars[car.first].to] / ((car.second.goaltime - ins.cars[car.first].startT)* ins.Tsim);
     }
 
     return ret * 3600 / 1000 / ins.cars.size();
@@ -566,7 +575,7 @@ int main(){
     }
     Instance ins;
     ins.read();
-
+    cerr << "num of blocks : " << ins.SumBlocks << endl;
     float avg = simulate(ins);
 
     cout << avg << endl;
