@@ -4,7 +4,7 @@ import random
 import sys
 
 
-Ncar = 5000
+Ncar = 500
 
 Vmax = 13.8888889
 Vmin = 1.66666667
