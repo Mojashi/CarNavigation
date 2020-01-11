@@ -16,7 +16,9 @@ using namespace std;
 enum Mode{
     GA,
     NOTSHORTEN,
-    MINDIST
+    MINDIST,
+    BYPASS,
+    GREEDY
 } mode;
 
 struct Solution;
@@ -31,11 +33,12 @@ Solution geneticAlgorithm(const Instance&,const Status&);
 Solution commander(const Instance&, const Status&);
 Solution genRandSol(const Instance&, const Status&);
 void mutation(const Instance&, const Status&,Solution&);
+void bypass(const Instance&, const Status&, Solution&);
 void shorten(const Instance&, const Status&,Solution&);
 array<Solution,2> crossOver(const Instance&, const Status&, Solution&, Solution&);
 
 std::random_device seed_gen;
-std::mt19937 mt(seed_gen());
+std::mt19937 mt(1);
 uniform_real_distribution<float> rng(0.0, 1.0);
 
 struct Edge{
@@ -55,18 +58,18 @@ struct Instance{
     Graph g;
     int N,M, lastStartTime;
 
-    float Vmax,Vmin, Pmut, Psht, Pind0, Pind1;
+    float Vmax,Vmin, Pmut, Psht, Pbps, Pind0, Pind1, Pind2;
     int Tstep,Tpred, Npop, Ngen, Tsim, Lsec;
     vector<vector<float>> Kjam;
     vector<Car> cars;
 
-    vector<vector<vector<int>>> edRank;
+    vector<vector<vector<int>>> edRank,distsrc;
     vector<vector<int>> dist, edgeIdxTable;
 
     int SumBlocks = 0;
 
     void read(){
-        cin >> Vmax >> Vmin >> Pmut >> Psht >> Pind0 >> Pind1
+        cin >> Vmax >> Vmin >> Pmut >> Psht >> Pbps >> Pind0 >> Pind1// >> Pind2
          >> Tstep >> Tpred >> Npop >> Ngen >> Tsim;
 		Lsec = Vmax * Tsim;
 		Tstep /= Tsim;
@@ -80,8 +83,8 @@ struct Instance{
         for(int i = 0; M > i; i++){
 			int f, t, d;
 			float jam;
-            SumBlocks += (d + Lsec-1) / Lsec;
             cin >> f >> t >> d >> jam;
+            SumBlocks += (d + Lsec-1) / Lsec;
             edgeIdxTable[f][t] = g.g[f].size();
             g.g[f].push_back({f,t,d});
             Kjam[f][t] = jam;
@@ -112,10 +115,40 @@ struct Instance{
             if(edRank[cur][goal][i] != from) 
                 ud++;
         }
+        if(i <= 0 || i > edRank[cur][goal].size()){
+            printf("u");
+        }
+        return edRank[cur][goal][i-1];
+    }
+    int getVertex(int cur, int ban, int ban2, int goal, int rank) const{
+        int ud = 0, i;
+        for(i = 0; ud <= rank && i < edRank[cur][goal].size(); i++){
+            if(edRank[cur][goal][i] != ban && edRank[cur][goal][i] != ban2) 
+                ud++;
+        }
 
         return edRank[cur][goal][i-1];
     }
+    int getDistDel(int from, int to, int del1, int del2) const{
+        int Min = INT32_MAX;
 
+        for(int i = 0; g.g[from].size() > i; i++){
+            if(g.g[from][i].to == del1 || g.g[from][i].to == del2) continue;
+
+            Min = min(Min, dist[g.g[from][i].to][to] + g.g[from][i].d);
+        }
+        return Min;
+    }
+    int getRank(int from, int bef, int goal, int to) const{
+        int ex = 0;
+        for(int i = 0;edRank[from][goal].size() > i; i++){
+            if(edRank[from][goal][i] == bef) ex = 1;
+            if(edRank[from][goal][i] == to) return i - ex;
+        }
+
+        assert(0);
+        return 0;
+    }
     void calcDistance(){
         dist.resize(g.size());
         edRank.resize(g.size());
@@ -141,12 +174,12 @@ struct Instance{
     void calcDistance(int from){
         priority_queue<pair<int,int>, vector<pair<int,int>>, greater<pair<int,int>>> pq;
         
-        fill(dist[from].begin(), dist[from].end(), -1);
+        fill(dist[from].begin(), dist[from].end(), INT32_MAX);
         pq.push(make_pair(0, from));
         while(pq.size()){
             auto cur = pq.top();
             pq.pop();
-            if(dist[from][cur.second] != -1) continue;
+            if(dist[from][cur.second] != INT32_MAX) continue;
 
             dist[from][cur.second] = cur.first;
             for(auto nex : g.g[cur.second]){
@@ -232,12 +265,13 @@ struct Status{
 Solution genRandSol(const Instance& ins, const Status& stat){
     Solution sol(ins);
 
-    for(int carid = 0; stat.carPos.size() > carid; carid++){
+    for(auto itrr : stat.carPos){
+        int carid = itrr.first;
 		if (stat.carPos.at(carid).goal) continue;
         Car car = ins.cars[carid];
         int cur = stat.carPos.at(carid).to, bef = -1;
         while(car.to != cur){
-            int rank = mt() % ins.g.g[cur].size();
+            int rank = mt() % (ins.g.g[cur].size());
             sol.route[carid].push_back(rank);
             int nex = ins.getVertex(cur, bef, car.to, rank);
 			bef = cur;
@@ -251,7 +285,8 @@ Solution genRandSol(const Instance& ins, const Status& stat){
 Solution genShortestPathSol(const Instance& ins, const Status& stat) {
 	Solution sol(ins);
 
-	for (int carid = 0; stat.carPos.size() > carid; carid++) {
+    for(auto itrr : stat.carPos){
+        int carid = itrr.first;
 		if (stat.carPos.at(carid).goal) continue;
 		Car car = ins.cars[carid];
 		int cur = stat.carPos.at(carid).to, bef = -1;
@@ -269,9 +304,10 @@ Solution genShortestPathSol(const Instance& ins, const Status& stat) {
 
 
 void mutation(const Instance& ins, const Status& stat, Solution& sol){
-    for(int carid = 0; stat.carPos.size() > carid; carid++){
+    for(auto itrr : stat.carPos){
+        int carid = itrr.first;
         Car car = ins.cars[carid];
-        int cur = stat.carPos.at(carid).from, bef = -1;
+        int cur = stat.carPos.at(carid).to, bef = -1;
 
         for(int i = 0; sol.route[carid].size() > i; i++){
             if(cur == car.to) {
@@ -293,10 +329,94 @@ void mutation(const Instance& ins, const Status& stat, Solution& sol){
     }
 }
 
+vector<int> simroute(const Instance& ins, const Status& stat, Solution& sol, int carid){
+    Car car = ins.cars[carid];
+    int cur = stat.carPos.at(carid).to, bef = -1, nex;
+    
+    vector<int> nroute(sol.route[carid].size() + 1);
+
+    nroute[0] = cur;
+    for(int i = 0; sol.route[carid].size() > i; i++){
+        nex = ins.getVertex(cur, bef, car.to, sol.route[carid][i]);
+        bef = cur;
+        cur = nex;
+        nroute[i + 1] = cur;
+    }
+    return nroute;
+}
+
+bool bypass(const Instance& ins, const Status& stat, Solution& sol, int carid, int pos){
+    Car car = ins.cars[carid];
+    int cur = stat.carPos.at(carid).to, bef = -1, nex;
+    if(sol.route[carid].size() == 1) return false;
+    assert(pos < sol.route[carid].size());
+    vector<int> nroute(sol.route[carid].size() + 1);
+
+    nroute[0] = cur;
+    for(int i = 0; sol.route[carid].size() > i; i++){
+        nex = ins.getVertex(cur, bef, car.to, sol.route[carid][i]);
+        bef = cur;
+        cur = nex;
+        nroute[i + 1] = cur;
+    }
+    
+    bef = -1;
+    if(pos > 0) bef = nroute[pos-1];
+
+    pair<int,int> Min = {INT32_MAX, -1};
+    for(int i = pos + 1; nroute.size() > i; i++){
+        Min = min(Min, {ins.getDistDel(nroute[pos], nroute[i], nroute[pos + 1], bef), i});
+    }
+    
+    if(Min.second == -1) return false;
+
+    vector<int> rese(sol.route[carid]);
+    vector<int> buf(sol.route[carid].begin() + Min.second, sol.route[carid].end());
+    sol.route[carid].erase(sol.route[carid].begin() + pos, sol.route[carid].end());
+
+    int target = nroute[Min.second];
+
+    if(target != nroute[pos]){
+        cur = ins.getVertex(nroute[pos],bef, nroute[pos + 1], target, 0);
+        int rank = ins.getRank(nroute[pos], bef, car.to, cur);
+        sol.route[carid].push_back(rank);
+        bef = nroute[pos];
+    
+        while(cur != target){
+            nex = ins.getVertex(cur, bef, target, 0);
+            rank = ins.getRank(cur, bef, car.to, nex);
+            if(rank == -1) {
+                sol.route[carid] = rese;
+                return false;
+            }
+            sol.route[carid].push_back(rank);
+            // vector<int> rr(simroute(ins, stat, sol, carid));
+            // if(rr.back() != nex){
+            //     printf("aa");
+            // }
+            bef = cur;
+            cur = nex;
+        }
+    }
+    sol.route[carid].insert(sol.route[carid].end(), buf.begin(), buf.end());
+
+    return true;
+}
+void bypass(const Instance& ins, const Status& stat, Solution& sol){
+    for(auto itrr : stat.carPos){
+        int carid = itrr.first;
+        if(sol.route[carid].size() == 0) continue;
+        if(rng(mt) < ins.Pbps){
+            bypass(ins,stat,sol,carid, mt()%sol.route[carid].size());
+        }
+    }
+}
+
 void shorten(const Instance& ins, const Status& stat, Solution& sol){
-    for(int carid = 0; stat.carPos.size() > carid; carid++){
+    for(auto itrr : stat.carPos){
+        int carid = itrr.first;
         Car car = ins.cars[carid];
-        int cur = stat.carPos.at(carid).from, bef = -1;
+        int cur = stat.carPos.at(carid).to, bef = -1;
 
         for(int i = 0; sol.route[carid].size() > i; i++){
             if(cur == car.to) {
@@ -442,6 +562,31 @@ float geneEval(const Instance& ins, const Status& bef, const Solution& sol){
     return score / bef.carPos.size();
 }
 
+void greedy(const Instance& ins, const Status& stat, Solution& sol, float ev){
+    cerr << ev << endl;
+    bool updated = true;
+    while(updated){
+        updated = false;
+    for(auto cc : stat.carPos){
+        int carid = cc.first;
+        for(int i = 0; sol.route[carid].size() > i; i++){
+            Solution buf(sol);
+            bool sccess = bypass(ins, stat, buf, carid, i);
+            if(sccess){
+                float nev = geneEval(ins, stat, buf);
+                 if(nev > ev){
+                     updated = true;
+                    cerr << "score:" << nev << endl;
+                    sol = buf;
+                    ev = nev;
+                }
+            }
+        }
+    }
+    }
+ 
+}
+
 Solution geneticAlgorithm(const Instance& ins, const Status& curStat){
     vector<pair<float, Solution>> gen;
     pair<float, Solution*> ace;
@@ -449,7 +594,11 @@ Solution geneticAlgorithm(const Instance& ins, const Status& curStat){
 
     gen.resize(ins.Npop);
     for(int i = 0; ins.Npop > i; i++){
-        Solution sol = genRandSol(ins,curStat);
+        Solution sol;
+        if(mode == GA)
+            sol = genRandSol(ins,curStat);
+        if(mode == BYPASS)
+            sol = genRandSol(ins,curStat);
         gen[i] = {geneEval(ins, curStat, sol), sol};
         if(i > 0){
             if(gen[i].first > ace.first)
@@ -496,11 +645,21 @@ Solution geneticAlgorithm(const Instance& ins, const Status& curStat){
 
         for(auto& sol : nextGen){
             if(rng(mt) < ins.Pind0){
-                if(mode == GA){
-                    if(rng(mt) < ins.Pind1)
+                if(mode == GA || mode == BYPASS){
+                    if(rng(mt) < ins.Pind1){
+                        if(mode == BYPASS){
+                            if(rng(mt) < 0.7)
+                                bypass(ins,curStat, sol);
+                            else
+                                mutation(ins, curStat, sol);
+                        }
+                        else 
+                            mutation(ins, curStat, sol);
+                    }
+                    else{
                         shorten(ins, curStat, sol);
-                    else
-                        mutation(ins, curStat, sol);
+                    }
+
                 }
                 else if(mode == NOTSHORTEN){
                     mutation(ins, curStat, sol);
@@ -530,10 +689,17 @@ Solution geneticAlgorithm(const Instance& ins, const Status& curStat){
 }
 
 Solution commander(const Instance& ins,const Status& stat){
-    if(mode == GA || mode == NOTSHORTEN)
+    if(mode == GA || mode == NOTSHORTEN || mode == BYPASS)
         return geneticAlgorithm(ins, stat);
     if(mode == MINDIST)
         return genShortestPathSol(ins, stat);
+    if(mode == GREEDY){
+        mode = GA;
+        Solution sol = geneticAlgorithm(ins, stat);
+        greedy(ins, stat, sol, geneEval(ins, stat, sol));
+        mode = GREEDY;
+        return sol;
+    }
 }
 
 
@@ -546,7 +712,7 @@ float simulate(const Instance& ins){
         if(t %ins.Tstep == 0 && t > 0){
             Status buf(stat);
             Solution buf2(schedule);
-			fprintf(stderr, "t=%d remain car=%d Calc routes...\n",t, stat.rest() + ins.cars.size() - stat.carPos.size());
+			fprintf(stderr, "t=%d remaining car=%d Calc routes...\n",t, stat.rest() + ins.cars.size() - stat.carPos.size());
             schedule = commander(ins, buf);
             schedule.show(stderr);
         }
@@ -563,12 +729,14 @@ float simulate(const Instance& ins){
     return ret * 3600 / 1000 / ins.cars.size();
 }
 
-int main(){
-    string modeStr;
-    cin >> modeStr;
+int main(int argc, char *argv[]){
+    string modeStr(argv[1]);
+    if(modeStr == "STDIN") cin >> modeStr;
     if(modeStr == "NOTSHORTEN") mode = NOTSHORTEN;
     else if(modeStr == "GA") mode = GA;
     else if(modeStr == "MINDIST") mode = MINDIST;
+    else if(modeStr == "BYPASS") mode = BYPASS;
+    else if(modeStr == "GREEDY") mode = GREEDY;
     else {
         cerr << "invalid mode" << endl;
         return 1;
